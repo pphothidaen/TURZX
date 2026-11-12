@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "id": "turzx-hardware-agent",
+  "name": "TURXZ Hardware Interface Agent",
+  "version": "1.0.0",
+  "category": "hardware",
+  "description": "Low-level communication agent directly interfacing with the USB controller and serial CDC interface for TURZX/Turing displays.",
+  "entrypoint": "turzx.driver:TURZXDriver",
+  "capabilities": [
+    "usb.bulk_transfer",
+    "usb.claim_interface",
+    "serial.open_port",
+    "serial.write_packet",
+    "hardware.probe_devices",
+    "hardware.reset_endpoint",
+    "protocol.encode_command"
+  ],
+  "permissions": [
+    "usb:raw_io",
+    "serial:rw",
+    "device:reset"
+  ],
+  "resource_boundaries": {
+    "default_baudrate": 115200,
+    "usb_timeout_ms": 3000,
+    "packet_chunk_bytes": 1024,
+    "max_retries_on_timeout": 3
+  },
+  "semantic_signature": {
+    "service": "turzx-hardware",
+    "vendor_id": "0x1A86",
+    "product_id": "0x5722",
+    "usb_serial_descriptor": "USB35INCHIPSV2",
+    "bulk_endpoint_out": "0x03",
+    "bulk_endpoint_in": "0x82"
+  },
+  "governance": {
+    "zero_assumption_compliance": true,
+    "fail_closed_on_error": true,
+    "enforce_local_process_token": true
+  },
+  "dependencies": {
+    "python": [
+      "pyusb>=1.2.0",
+      "pyserial>=3.5"
+    ]
+  }
+}

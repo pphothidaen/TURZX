@@ -6,7 +6,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 import structlog
 import asyncio
 import threading
@@ -14,8 +17,11 @@ import time
 
 # Initialize global services
 try:
-    redis_client = redis.from_url("redis://localhost:6379/0")
-    redis_client.ping()  # Test connection
+    if redis:
+        redis_client = redis.from_url("redis://localhost:6379/0")
+        redis_client.ping()  # Test connection
+    else:
+        redis_client = None
 except Exception as e:
     print(f"Warning: Could not connect to Redis: {e}")
     redis_client = None
@@ -24,13 +30,6 @@ except Exception as e:
 try:
     from backend.services.turzx_display_service import TURZXDisplayService
     _turxz_display_service = TURZXDisplayService(redis_client)
-    # Initialize hardware on startup
-    if _turxz_display_service:
-        init_result = _turxz_display_service.initialize_hardware()
-        if init_result.get('hardware_ready'):
-            print("✓ TURXZ display hardware initialized successfully")
-        else:
-            print(f"⚠ TURXZ display hardware init issue: {init_result.get('error', 'Unknown')}")
 except Exception as e:
     print(f"Warning: Could not initialize TURXZ display service: {e}")
     _turxz_display_service = None
@@ -67,26 +66,40 @@ _display_render_thread = None
 def _start_display_render_loop():
     """Launch the periodic agent-quota dashboard render loop (runs at app startup)."""
     global _display_render_running, _display_render_task, _display_render_thread
-    if _display_render_thread is not None:
+    if _display_render_thread is not None and _display_render_thread.is_alive():
         return
 
     def _render_loop():
+        # Initial sync from Hermes agent and scheduled jobs data
+        loop_counter = 0
+        if _agent_quota_manager:
+            try:
+                _agent_quota_manager.sync_agent_quotas()
+            except Exception as e:
+                logger.warning(f"[display-render] initial quota sync: {e}")
+
         while _display_render_running:
             try:
-                if _turxz_display_service and _turxz_display_service._hardware_initialized:
-                    agent_ids = [f"agy{i}" for i in range(1, 6)] + [f"codex{i}" for i in range(1, 4)]
-                    agent_data = {}
-                    for agent_id in agent_ids:
-                        if _agent_quota_manager is None:
-                            continue
-                        quota = _agent_quota_manager.get_quota_status(agent_id)
-                        if quota:
-                            agent_data[agent_id] = quota
-                    if agent_data:
-                        _turxz_display_service.render_quota_display(agent_data)
+                # Re-sync every 30 seconds (3 iterations of 10s sleep)
+                if _agent_quota_manager and loop_counter % 3 == 0:
+                    try:
+                        _agent_quota_manager.sync_agent_quotas()
+                    except Exception as e:
+                        logger.warning(f"[display-render] periodic quota sync: {e}")
+
+                if _turxz_display_service:
+                    if not _turxz_display_service._hardware_initialized:
+                        _turxz_display_service.initialize_hardware()
+
+                    if _turxz_display_service._hardware_initialized and _agent_quota_manager:
+                        agent_data = _agent_quota_manager.get_all_quotas()
+                        hermes_jobs = _agent_quota_manager.get_hermes_jobs() if hasattr(_agent_quota_manager, "get_hermes_jobs") else []
+                        if agent_data:
+                            _turxz_display_service.render_quota_display(agent_data, hermes_jobs=hermes_jobs)
             except Exception as e:
                 logger.error(f"[display-render] periodic render failed: {type(e).__name__}: {e}")
-            time.sleep(5)
+            loop_counter += 1
+            time.sleep(10)
 
     _display_render_running = True
     _display_render_thread = threading.Thread(target=_render_loop, daemon=True, name="turzx-display-render")
@@ -105,7 +118,7 @@ def _stop_display_render_loop():
         _display_render_thread = None
 
 
-def create_app():
+def create_app(start_render_loop: bool = True):
     """Create and configure FastAPI application."""
     app = FastAPI(
         title="DeepSeek Web Bridge Backend",
@@ -113,9 +126,26 @@ def create_app():
         version="1.0.0",
     )
 
-    # Start the periodic agent-quota dashboard render loop so the TURZX display
-    # always shows the latest agent quota data (fixes the default/blank screen).
-    _start_display_render_loop()
+    # Initialize display hardware if available and not yet initialized
+    if _turxz_display_service and not _turxz_display_service._hardware_initialized:
+        try:
+            init_result = _turxz_display_service.initialize_hardware()
+            if init_result.get('hardware_ready'):
+                print("✓ TURZX display hardware initialized successfully")
+            else:
+                print(f"⚠ TURZX display hardware init issue: {init_result.get('error', 'Unknown')}")
+        except Exception as e:
+            print(f"⚠ Could not initialize TURZX hardware on app create: {e}")
+
+    # Start periodic render loop if requested
+    if start_render_loop:
+        _start_display_render_loop()
+
+    @app.on_event("shutdown")
+    def shutdown_event():
+        _stop_display_render_loop()
+        if _turxz_display_service:
+            _turxz_display_service.disconnect()
 
     @app.get("/health")
     async def health_check():
@@ -335,32 +365,48 @@ def create_app():
         if not _agent_quota_manager or not _turxz_display_service:
             raise HTTPException(status_code=503, detail="Services not initialized")
 
-            try:
-                agent_ids = [f"agy{i}" for i in range(1, 6)] + [f"codex{i}" for i in range(1, 4)]
+        try:
+            agent_ids = [f"agy{i}" for i in range(1, 6)] + [f"codex{i}" for i in range(1, 4)]
 
-                quota_statuses = {}
-                all_sessions = _turxz_display_service.get_all_sessions()
-                display_analytics = _turxz_display_service.get_display_analytics(hours=24)
+            quota_statuses = {}
+            all_sessions = _turxz_display_service.get_all_sessions()
+            display_analytics = _turxz_display_service.get_display_analytics(hours=24)
 
-                for agent_id in agent_ids:
-                    quota_statuses[agent_id] = _agent_quota_manager.get_quota_status(agent_id)
+            for agent_id in agent_ids:
+                quota_statuses[agent_id] = _agent_quota_manager.get_quota_status(agent_id)
 
-                # Collect sessions per agent
-                agent_sessions = {}
-                for agent_id in agent_ids:
-                    agent_sessions[agent_id] = [
-                        s for s in all_sessions if s.get("agent_id") == agent_id
-                    ]
+            # Collect sessions per agent
+            agent_sessions = {}
+            for agent_id in agent_ids:
+                agent_sessions[agent_id] = [
+                    s for s in all_sessions if s.get("agent_id") == agent_id
+                ]
 
-                return {
-                    "agents": agent_ids,
-                    "quota_statuses": quota_statuses,
-                    "agent_sessions": agent_sessions,
-                    "display_analytics": display_analytics,
-                }
-            except Exception as e:
-                logger.error(f"Failed to get agent dashboard: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Failed to get agent dashboard: {str(e)}")
+            return {
+                "agents": agent_ids,
+                "quota_statuses": quota_statuses,
+                "agent_sessions": agent_sessions,
+                "display_analytics": display_analytics,
+                "hermes_jobs": _agent_quota_manager.get_hermes_jobs() if hasattr(_agent_quota_manager, "get_hermes_jobs") else [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to get agent dashboard: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to get agent dashboard: {str(e)}")
+
+    @app.post("/api/v1/agent/quota/sync")
+    async def sync_agent_quotas_endpoint():
+        """Trigger quota synchronization from Hermes agent and scheduled jobs data."""
+        if not _agent_quota_manager:
+            raise HTTPException(status_code=503, detail="Agent quota manager not initialized")
+        try:
+            sync_result = _agent_quota_manager.sync_agent_quotas()
+            if _turxz_display_service and _turxz_display_service._hardware_initialized:
+                agent_data = _agent_quota_manager.get_all_quotas()
+                _turxz_display_service.render_quota_display(agent_data)
+            return {"success": True, "result": sync_result}
+        except Exception as e:
+            logger.error(f"Quota sync failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Quota sync failed: {str(e)}")
 
     @app.get("/ready")
     async def readiness_probe():

@@ -1,0 +1,83 @@
+name: TURXZ CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-verify:
+    name: Test & Verify (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Validate AI Agent JSON Schemas
+        run: |
+          python -c "
+          import json, glob, sys
+          files = glob.glob('.agents/ai/**/*.json', recursive=True)
+          if len(files) < 5:
+              print(f'ERROR: Expected at least 5 agent definitions, found {len(files)}')
+              sys.exit(1)
+          required_keys = ['id', 'name', 'version', 'category', 'capabilities', 'permissions', 'resource_boundaries', 'governance']
+          required_agents = {
+              'turzx-core-agent',
+              'turzx-hardware-agent',
+              'turzx-integration-agent',
+              'turzx-scheduler-agent',
+              'turzx-test-agent'
+          }
+          found_agents = set()
+          for f in files:
+              data = json.load(open(f, encoding='utf-8'))
+              for k in required_keys:
+                  if k not in data:
+                      print(f'ERROR: {f} missing {k}')
+                      sys.exit(1)
+              found_agents.add(data['id'])
+          missing = required_agents - found_agents
+          if missing:
+              print(f'ERROR: Missing required agent IDs: {sorted(missing)}')
+              sys.exit(1)
+          print(f'Successfully validated {len(files)} agent JSON definitions: {sorted(found_agents)}')
+          "
+
+      - name: Verify Shell Scripts and Git Hooks Syntax
+        run: |
+          bash -n .githooks/pre-commit
+          bash -n .githooks/pre-push
+          bash -n scripts/bootstrap.sh
+          bash -n scripts/setup.sh
+          bash -n scripts/test.sh
+
+      - name: Run Ruff Linter
+        run: |
+          ruff check turzx turxz_scheduled_jobs tests
+
+      - name: Verify CLI Entrypoints
+        run: |
+          turzx --help
+          turxz-scheduler --help
+
+      - name: Run Pytest Test Suite (Mock Hardware Harness)
+        run: |
+          pytest -v tests/ --cov=turzx --cov=turxz_scheduled_jobs --cov-report=xml --cov-report=term-missing

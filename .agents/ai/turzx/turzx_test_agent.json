@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "id": "turzx-test-agent",
+  "name": "TURXZ Test & Verification Agent",
+  "version": "1.0.0",
+  "category": "testing",
+  "description": "Testing and verification agent providing mock USB/serial hardware harnesses, protocol regression suites, and CI/CD validation.",
+  "entrypoint": "scripts/test.sh",
+  "capabilities": [
+    "test.execute_suite",
+    "test.run_fast",
+    "test.run_coverage",
+    "device.mock_usb",
+    "device.mock_serial",
+    "protocol.verify_commands",
+    "report.generate_summary"
+  ],
+  "permissions": [
+    "test:execute",
+    "device:mock",
+    "report:generate"
+  ],
+  "resource_boundaries": {
+    "max_test_duration_seconds": 60.0,
+    "mock_packet_latency_ms": 0,
+    "coverage_threshold_percent": 80.0
+  },
+  "semantic_signature": {
+    "service": "turzx-test-verification",
+    "suite_type": "pytest-mock",
+    "supported_fixtures": [
+      "mock_device",
+      "mock_serial",
+      "mock_scheduler"
+    ]
+  },
+  "governance": {
+    "zero_assumption_compliance": true,
+    "fail_closed_on_error": true,
+    "enforce_local_process_token": true
+  },
+  "dependencies": {
+    "internal": [
+      "turzx-core-agent",
+      "turzx-hardware-agent",
+      "turzx-scheduler-agent"
+    ],
+    "python": [
+      "pytest>=7.0.0",
+      "pytest-mock",
+      "pytest-cov"
+    ]
+  }
+}

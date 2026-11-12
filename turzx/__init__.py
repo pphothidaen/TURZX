@@ -51,8 +51,40 @@ from .protocol import (
     encode_hello_packet,
     encode_orientation_packet,
 )
+from .auth import (
+    PermissionDeniedError,
+    clear_process_token,
+    generate_process_token,
+    get_process_token,
+    get_token_path,
+    require_process_token,
+    verify_process_token,
+)
+from .provisioner import (
+    DEFAULT_CAROUSEL_PID_FILE,
+    SEED_AGENT_IDS,
+    AgentProvisioner,
+    PRESETS,
+    get_default_seed_agents,
+    notify_carousel_reload,
+)
 
 __all__ = [
+    # Provisioner
+    "AgentProvisioner",
+    "PRESETS",
+    "get_default_seed_agents",
+    "notify_carousel_reload",
+    "DEFAULT_CAROUSEL_PID_FILE",
+    "SEED_AGENT_IDS",
+    # Auth & Tokens
+    "PermissionDeniedError",
+    "generate_process_token",
+    "get_process_token",
+    "get_token_path",
+    "verify_process_token",
+    "require_process_token",
+    "clear_process_token",
     # Driver
     "TURZXDriver",
     "TURXZSerialDriver",

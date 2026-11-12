@@ -191,3 +191,81 @@ $$\text{Byte}_{1} = (\text{word} \gg 8) \ \& \ 0\text{xFF} = (R_{5} \ll 3) \mid 
    - Total payload for 320 × 480 is: $320 \times 480 \times 2 = 307,200 \text{ bytes}$.
    - For USB Bulk: stream in **4096-byte aligned chunks** to Endpoint `0x03`.
    - For Serial: stream in **$width \times 8$ byte chunks** (2,560 bytes) and flush.
+
+---
+
+## 4. Multi-Agent System Architecture & Governance
+
+The TURZX platform features a layered autonomous agent framework designed to safely decouple hardware control, background scheduling, external AI agent status synchronization, and test validation.
+
+```
+                      +---------------------------------------+
+                      |         Human Operator / CLI          |
+                      +---------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+|                            TURZX Multi-Agent Layer                                |
+|                                                                                   |
+|   +--------------------------+               +--------------------------------+   |
+|   |    turzx-core-agent      |<=============>|     turzx-scheduler-agent      |   |
+|   |  - Display pipeline      |  Local IPC    |  - Cron & Interval tasks       |   |
+|   |  - Framebuffer & RGB565  |  Tokens       |  - Health & Quota monitoring   |   |
+|   |  - CLI Dispatcher        |               |  - Execution lifecycle         |   |
+|   +--------------------------+               +--------------------------------+   |
+|                 |                                             |                   |
+|                 v                                             v                   |
+|   +--------------------------+               +--------------------------------+   |
+|   |   turzx-hardware-agent   |               |   turzx-integration-agent      |   |
+|   |  - USB Bulk (0x1A86:5722)|               |  - Session Bridge              |   |
+|   |  - CDC Serial (/dev/cu*) |               |  - Agent Quotas                |   |
+|   |  - Failover & Recovery   |               |  - Redis & External Agents     |   |
+|   +--------------------------+               +--------------------------------+   |
+|                                                                                   |
+|                        +---------------------------+                              |
+|                        |     turzx-test-agent      |                              |
+|                        |  - Mock USB & Serial      |                              |
+|                        |  - CI/CD Test Harness     |                              |
+|                        +---------------------------+                              |
++-----------------------------------------------------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+|                               Physical Hardware                                   |
+|                CH340/CH341 USB-to-Serial & AX206/LCM Display Buffer               |
++-----------------------------------------------------------------------------------+
+```
+
+### The Five Governance Golden Rules
+
+1. **Zero Assumption Compliance**: No agent assumes hardware connection without active USB descriptor (`0x1A86:0x5722`) or CDC serial port interrogation.
+2. **Fail-Closed Enforcement**: Any protocol error, corrupt buffer, or unrecognized token immediately aborts execution safely without flooding endpoints or leaving displays in undefined states.
+3. **Semantic Signature Verification**: All command messages and inter-agent signals must match declared JSON schemas in `.agents/ai/`.
+4. **Resource Boundary Enforcement**: Hard caps are enforced: 30 FPS display rate, 768 KB max frame buffers, 10 concurrent jobs, and 300-second job timeouts.
+5. **Lightweight Local Process Token Authentication**: For local macOS intra-process traffic, communication is secured via shared process tokens (`TURXZ_PROCESS_TOKEN`) with `0600` POSIX file security and constant-time HMAC validation.
+
+---
+
+## 5. Scheduler Architecture & Task Lifecycle
+
+The `turxz_scheduled_jobs` engine coordinates periodic and event-driven routines:
+
+```
+[Start Scheduler Daemon]
+         │
+         ├──> [Execute Startup Jobs (ScheduleType.STARTUP)]
+         │
+         └──> [Scheduler Main Loop (Tick Interval = 1.0s)]
+                   │
+                   ├──> [Check Trigger Conditions: Interval / Cron / Once]
+                   │          │
+                   │          v (Due)
+                   │    [TURXZJobExecutor]
+                   │          ├── Thread Pool Worker (default)
+                   │          ├── Async Event Loop Worker
+                   │          └── Synchronous Worker
+                   │
+                   ├──> [HealthMonitor Sample (Memory, CPU, Status)]
+                   │
+                   └──> [Prune Ring Buffer History (Max 1000 items)]
+```

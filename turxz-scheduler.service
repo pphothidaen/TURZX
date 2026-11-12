@@ -1,0 +1,27 @@
+[Unit]
+Description=TURXZ Native Scheduler
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=kimlenglim
+WorkingDirectory=/Users/kimlenglim/Project/TURZX
+Environment=PYTHONPATH=/Users/kimlenglim/Project/TURZX
+Environment=TURXZ_SCHEDULER_CONFIG=/Users/kimlenglim/Project/TURZX/config/scheduler.json
+ExecStart=/Users/kimlenglim/Project/TURZX/.venv/bin/python -m turxz_scheduled_jobs.cli start --foreground
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=turxz-scheduler
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/Users/kimlenglim/Project/TURZX /var/lib/turxz
+
+[Install]
+WantedBy=multi-user.target

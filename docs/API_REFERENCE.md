@@ -205,3 +205,122 @@ Generates calibration patterns:
 - `encode_orientation_packet(orientation: Union[Orientation, int], width: int, height: int) -> bytes`: Returns 16-byte orientation packet.
 - `encode_hello_packet() -> bytes`: Returns 6-byte `0x45` handshake query.
 - `brightness_to_device_level(level: int) -> int`: Converts 0–100% to 0–255 hardware level.
+
+---
+
+## 4. Native Scheduler API (`turxz_scheduled_jobs`)
+
+The `turxz_scheduled_jobs` package provides asynchronous and multi-threaded background job scheduling for the TURZX display and AI agent ecosystems.
+
+### Imports
+```python
+from turxz_scheduled_jobs import (
+    TURXZScheduler,
+    TURXZJobManager,
+    TURXZJobExecutor,
+    JobDefinition,
+    ScheduledJob,
+    JobPriority,
+    JobStatus,
+    ScheduleType,
+    ExecutionResult,
+    ExecutionMode,
+    HealthMonitor,
+)
+```
+
+---
+
+### Class: `TURXZScheduler`
+
+The central orchestrator for registered jobs, worker threads, and event loop cycles.
+
+#### Constructor
+```python
+scheduler = TURXZScheduler(
+    job_manager: Optional[TURXZJobManager] = None,
+    executor: Optional[TURXZJobExecutor] = None,
+    health_monitor: Optional[HealthMonitor] = None,
+    tick_interval: float = 1.0,
+)
+```
+
+#### Key Methods:
+- `start(block: bool = False)`: Starts the scheduler background thread.
+- `stop(timeout: float = 5.0)`: Gracefully stops the scheduler and waits for active jobs.
+- `add_job(name: str, schedule_type: ScheduleType, schedule_value: Any, handler: Callable, ...) -> str`: Registers a new scheduled job and returns its unique `job_id`.
+- `remove_job(job_id: str) -> bool`: Unregisters and removes a job.
+- `run_job_now(job_id: str) -> ExecutionResult`: Triggers an immediate execution of the specified job.
+- `get_status() -> Dict[str, Any]`: Returns running status, active jobs, worker counts, and next scheduled execution.
+
+---
+
+### Class: `TURXZJobManager`
+
+State persistence and memory repository for all active job configurations and history.
+
+#### Key Methods:
+- `register_job(job: JobDefinition) -> ScheduledJob`: Adds a job to active registry.
+- `unregister_job(job_id: str) -> bool`: Removes job by ID.
+- `get_job(job_id: str) -> Optional[ScheduledJob]`: Retrieves job metadata.
+- `list_jobs(tag: Optional[str] = None) -> List[ScheduledJob]`: Filters registered jobs.
+- `record_execution(job_id: str, result: ExecutionResult)`: Records execution metrics into bounded history ring buffer.
+
+---
+
+### Data Models & Enums
+
+#### `JobDefinition`
+```python
+@dataclass
+class JobDefinition:
+    name: str
+    handler: Callable
+    job_id: Optional[str] = None
+    args: tuple = ()
+    kwargs: dict = field(default_factory=dict)
+    timeout: float = 300.0
+    priority: JobPriority = JobPriority.NORMAL
+    execution_mode: ExecutionMode = ExecutionMode.THREAD
+    tags: List[str] = field(default_factory=list)
+```
+
+#### `JobPriority`
+- `JobPriority.CRITICAL`
+- `JobPriority.HIGH`
+- `JobPriority.NORMAL`
+- `JobPriority.LOW`
+
+#### `ScheduleType`
+- `ScheduleType.INTERVAL`: Fixed periodic seconds (e.g. `30`).
+- `ScheduleType.CRON`: 5-part cron syntax (e.g. `"*/5 * * * *"`).
+- `ScheduleType.ONCE`: Single execution at specified datetime.
+- `ScheduleType.STARTUP`: Executed immediately when the scheduler daemon starts.
+- `ScheduleType.SHUTDOWN`: Executed during clean shutdown sequences.
+
+---
+
+## 5. Agent Scaffolding Integration
+
+Agents defined in `.agents/ai/turzx/` leverage these APIs directly:
+- `turzx-core-agent`: Invokes `TURZXDriver` and `image_utils` for rendering.
+- `turzx-scheduler-agent`: Wraps `TURXZScheduler` for system jobs and watchdog maintenance.
+- `turzx-hardware-agent`: Direct interface with `TURZXDriver` USB bulk streaming.
+- `turzx-integration-agent`: Orchestrates session states and `agent_quota_manager`.
+- `turzx-test-agent`: Executes mock verification using `pytest` fixtures.
+
+---
+
+## 6. Lightweight Local Process Token Authentication (`turzx.auth`)
+
+Implements **Rule 5** of the TURXZ Agent Governance Framework for securing local macOS intra-process IPC and loopback communication.
+
+### Key Functions & Exceptions:
+- `generate_process_token(force_regenerate: bool = False) -> str`: Generates 64-hex-char pseudorandom token (`secrets.token_hex(32)`), writes it to `$TMPDIR/turxz-$UID/process.token` with POSIX mode `0600`, and sets `TURXZ_PROCESS_TOKEN` in `os.environ`.
+- `get_process_token() -> Optional[str]`: Reads the active process token from environment or file, validating that file permissions are strictly owner read/write only.
+- `verify_process_token(candidate_token: Optional[str]) -> bool`: Validates candidate token using constant-time comparison (`hmac.compare_digest`).
+- `require_process_token(candidate_token: Optional[str]) -> None`: Aborts execution and raises `PermissionDeniedError` if candidate token is invalid or missing (Fail-Closed).
+- `clear_process_token() -> None`: Cleans up active token and deletes token file.
+- `PermissionDeniedError`: Exception raised on token validation failure.
+
+

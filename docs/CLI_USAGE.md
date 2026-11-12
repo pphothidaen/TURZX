@@ -209,3 +209,125 @@ done
 # Turn on display at 7:00 AM
 0 7 * * * turzx power on
 ```
+
+---
+
+# TURXZ Scheduler CLI (`turxz-scheduler`)
+
+The `turxz-scheduler` command provides a native background job orchestrator for recurring display refreshes, telemetry sampling, quota enforcement, and system daemon lifecycle management.
+
+## Overview
+
+```bash
+turxz-scheduler [-h] [--config CONFIG] [--log-level {DEBUG,INFO,WARNING,ERROR}] <command> [options]
+
+Commands:
+  start       Start the scheduler daemon
+  status      Show scheduler status and job metrics
+  add-job     Register a scheduled job
+  remove-job  Remove a scheduled job by ID
+  run-job     Execute a job immediately
+```
+
+### Global Options:
+- `-c, --config PATH`: Path to JSON or YAML scheduler configuration file.
+- `--log-level LEVEL`: Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). Default: `INFO`.
+
+---
+
+## 1. `turxz-scheduler start` — Start Daemon
+
+Starts the scheduler event loop in the foreground or as a background service.
+
+```bash
+# Start scheduler with default settings
+turxz-scheduler start
+
+# Start with custom config file and debug logs
+turxz-scheduler start --config config/scheduler.json --log-level DEBUG
+```
+
+---
+
+## 2. `turxz-scheduler status` — View Scheduler Status
+
+Inspects the running scheduler status, uptime, worker thread pools, and registered jobs.
+
+```bash
+turxz-scheduler status
+```
+
+### Example Output:
+```json
+{
+  "running": true,
+  "jobs_count": 4,
+  "next_run": "2026-11-12T10:35:00.000000",
+  "active_workers": 1,
+  "completed_jobs": 142
+}
+```
+
+---
+
+## 3. `turxz-scheduler add-job` — Register Scheduled Job
+
+Dynamically registers an automated recurring task into the scheduler engine.
+
+```bash
+turxz-scheduler add-job \
+  --name NAME \
+  --type {interval,cron,once,startup,shutdown} \
+  --value VALUE \
+  --handler HANDLER \
+  [--id ID] \
+  [--timeout TIMEOUT] \
+  [--priority {low,normal,high,critical}] \
+  [--max-runs MAX_RUNS] \
+  [--disabled]
+```
+
+### Parameters:
+| Option | Required | Description |
+|---|---|---|
+| `--name` | Yes | Human-readable name for the job |
+| `--type` | Yes | Schedule type: `interval` (seconds), `cron` (5-part expr), `once`, `startup`, `shutdown` |
+| `--value` | Yes | Schedule value (e.g. `60` for 60s interval or `*/5 * * * *` for cron) |
+| `--handler`| Yes | Callable function target (e.g. `turzx_display_service:_scheduled_display_health_check`) |
+| `--id` | No | Unique alphanumeric ID (auto-generated if omitted) |
+| `--timeout`| No | Maximum execution time in seconds before fail-closed abort |
+| `--priority`| No | Scheduling priority: `low`, `normal`, `high`, `critical` |
+| `--max-runs`| No | Auto-remove job after specified number of executions |
+| `--disabled`| No | Add in paused/disabled state |
+
+### Example:
+```bash
+# Add a 30-second interval display telemetry sampler
+turxz-scheduler add-job \
+  --name "Display Telemetry" \
+  --type interval \
+  --value 30 \
+  --handler "turzx_display_service:_scheduled_metrics_collection" \
+  --priority high
+```
+
+---
+
+## 4. `turxz-scheduler run-job` — Trigger Job Immediately
+
+Forces an immediate execution of a registered job, bypassing its next scheduled time.
+
+```bash
+turxz-scheduler run-job --id "display_hardware_status"
+```
+
+---
+
+## 5. `turxz-scheduler remove-job` — Unregister Job
+
+Safely removes a job definition from the scheduler registry.
+
+```bash
+turxz-scheduler remove-job --id "display_hardware_status"
+```
+

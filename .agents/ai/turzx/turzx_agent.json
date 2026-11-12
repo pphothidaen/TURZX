@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "id": "turzx-core-agent",
+  "name": "TURXZ Core Display Agent",
+  "version": "1.0.0",
+  "category": "core",
+  "description": "Primary high-level agent responsible for image pre-processing, RGB565 encoding, display orientation, and CLI command dispatch.",
+  "entrypoint": "turzx.cli:main",
+  "capabilities": [
+    "display.render_frame",
+    "display.set_brightness",
+    "display.clear",
+    "display.set_orientation",
+    "image.convert_rgb565",
+    "image.resize_and_crop",
+    "cli.dispatch"
+  ],
+  "permissions": [
+    "display:write",
+    "image:transform",
+    "cli:execute"
+  ],
+  "resource_boundaries": {
+    "max_frame_rate_fps": 30,
+    "max_resolution_pixels": [480, 800],
+    "max_frame_buffer_bytes": 768000,
+    "execution_timeout_seconds": 15.0
+  },
+  "semantic_signature": {
+    "service": "turzx-core",
+    "protocol_version": "rev_a",
+    "supported_revisions": ["3.5inch", "5.0inch", "7.0inch"]
+  },
+  "governance": {
+    "zero_assumption_compliance": true,
+    "fail_closed_on_error": true,
+    "enforce_local_process_token": true
+  },
+  "dependencies": {
+    "internal": [
+      "turzx-hardware-agent"
+    ],
+    "python": [
+      "pillow>=9.0.0",
+      "numpy>=1.20.0"
+    ]
+  }
+}

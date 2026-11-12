@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "id": "turzx-scheduler-agent",
+  "name": "TURXZ Scheduler Agent",
+  "version": "1.0.0",
+  "category": "scheduler",
+  "description": "Background task scheduling agent managing interval, cron, startup, and one-off job execution, health checks, and state persistence.",
+  "entrypoint": "turxz_scheduled_jobs.cli:main",
+  "capabilities": [
+    "scheduler.add_job",
+    "scheduler.remove_job",
+    "scheduler.trigger_now",
+    "scheduler.list_jobs",
+    "scheduler.pause",
+    "scheduler.resume",
+    "health.check_system",
+    "telemetry.collect_metrics"
+  ],
+  "permissions": [
+    "scheduler:manage",
+    "job:execute",
+    "telemetry:read",
+    "telemetry:write",
+    "state:persist"
+  ],
+  "resource_boundaries": {
+    "max_concurrent_jobs": 10,
+    "default_job_timeout_seconds": 300.0,
+    "max_history_entries": 1000,
+    "scheduler_tick_seconds": 1.0
+  },
+  "semantic_signature": {
+    "service": "turxz-scheduled-jobs",
+    "schedule_types": ["interval", "cron", "startup", "one_off"],
+    "supported_priorities": ["critical", "high", "normal", "low"]
+  },
+  "governance": {
+    "zero_assumption_compliance": true,
+    "fail_closed_on_error": true,
+    "enforce_local_process_token": true
+  },
+  "dependencies": {
+    "internal": [
+      "turzx-core-agent"
+    ],
+    "python": [
+      "structlog>=24.0.0"
+    ]
+  }
+}

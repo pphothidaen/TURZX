@@ -1,0 +1,97 @@
+{
+  "version": "1.0.0",
+  "created_at": "2024-11-12T00:00:00.000000",
+  "updated_at": "2024-11-12T00:00:00.000000",
+  "scheduler": {
+    "check_interval": 1.0,
+    "max_concurrent_jobs": 10,
+    "default_timeout": 300.0,
+    "default_retry_count": 0,
+    "default_retry_delay": 1.0,
+    "enable_persistence": true,
+    "persistence_path": "/var/lib/turxz/scheduler_jobs.json",
+    "log_level": "INFO"
+  },
+  "executor": {
+    "max_workers": 10,
+    "default_mode": "thread",
+    "enable_metrics": true
+  },
+  "job_defaults": {
+    "timeout": 300.0,
+    "priority": "normal",
+    "retries": 0,
+    "retry_delay": 1.0
+  },
+  "health_check": {
+    "enabled": true,
+    "interval": 60.0,
+    "timeout": 10.0,
+    "failure_threshold": 3,
+    "checks": [
+      "scheduler_running",
+      "executor_healthy",
+      "job_queue_healthy",
+      "disk_space",
+      "memory_usage"
+    ]
+  },
+  "custom": {
+    "turxz_jobs": {
+      "agent_quota_check": {
+        "enabled": true,
+        "schedule_type": "interval",
+        "schedule_value": 300.0,
+        "description": "Check agent quota status every 5 minutes"
+      },
+      "agent_quota_cleanup": {
+        "enabled": true,
+        "schedule_type": "startup",
+        "schedule_value": 0,
+        "description": "Clean up expired quota entries on startup"
+      },
+      "agent_quota_daily_reset": {
+        "enabled": true,
+        "schedule_type": "cron",
+        "schedule_value": "0 0 * * *",
+        "description": "Daily quota reset at midnight"
+      },
+      "display_health_check": {
+        "enabled": true,
+        "schedule_type": "interval",
+        "schedule_value": 120.0,
+        "description": "Check display hardware health every 2 minutes"
+      },
+      "display_session_cleanup": {
+        "enabled": true,
+        "schedule_type": "interval",
+        "schedule_value": 3600.0,
+        "description": "Clean up expired display sessions every hour"
+      },
+      "display_metrics_collection": {
+        "enabled": true,
+        "schedule_type": "interval",
+        "schedule_value": 300.0,
+        "description": "Collect display metrics every 5 minutes"
+      },
+      "display_hardware_status": {
+        "enabled": true,
+        "schedule_type": "startup",
+        "schedule_value": 0,
+        "description": "Check display hardware on startup"
+      },
+      "metrics_collection": {
+        "enabled": true,
+        "schedule_type": "interval",
+        "schedule_value": 60.0,
+        "description": "Collect system metrics every minute"
+      },
+      "cleanup_history": {
+        "enabled": true,
+        "schedule_type": "startup",
+        "schedule_value": 0,
+        "description": "Clean up old execution history on startup"
+      }
+    }
+  }
+}

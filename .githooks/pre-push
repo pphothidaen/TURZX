@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# TURXZ Pre-Push Hook
+# Ensures all pytest tests pass and working state is clean prior to remote push.
+# ==============================================================================
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+echo -e "${BLUE}${BOLD}[TURXZ Pre-Push]${NC} Verifying repository state and running test suite..."
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Determine python / pytest executable
+if [ -x ".venv/bin/pytest" ]; then
+    PYTEST_BIN=".venv/bin/pytest"
+elif command -v pytest >/dev/null 2>&1; then
+    PYTEST_BIN="pytest"
+elif [ -x ".venv/bin/python" ]; then
+    PYTEST_BIN=".venv/bin/python -m pytest"
+else
+    PYTEST_BIN="python3 -m pytest"
+fi
+
+# ------------------------------------------------------------------------------
+# Gate 1: Git Branch & Remote Integrity
+# ------------------------------------------------------------------------------
+CURRENT_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo 'detached')"
+echo -e "${BLUE}[Gate 1/2]${NC} Checking Git branch state (current: ${CURRENT_BRANCH})..."
+
+if [ "$CURRENT_BRANCH" = "detached" ]; then
+    echo -e "${YELLOW}[WARN] Pushing from a detached HEAD state.${NC}"
+fi
+
+# ------------------------------------------------------------------------------
+# Gate 2: Full Test Suite Execution
+# ------------------------------------------------------------------------------
+echo -e "${BLUE}[Gate 2/2]${NC} Executing automated test suite..."
+
+if ! $PYTEST_BIN tests/; then
+    echo -e "${RED}${BOLD}[FAIL] Pre-push verification failed: Unit tests did not pass!${NC}"
+    echo -e "${YELLOW}Remediation:${NC}"
+    echo "  1. Run '.venv/bin/pytest -v' to view detailed test failures."
+    echo "  2. Fix all breaking regressions before pushing to the remote repository."
+    echo "  3. Never force-push or bypass hooks with --no-verify on protected branches."
+    exit 1
+fi
+
+echo -e "${GREEN}${BOLD}✓ All test suites passed! Push authorized.${NC}"
+exit 0

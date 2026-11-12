@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "id": "turzx-integration-agent",
+  "name": "TURXZ Integration & Bridge Agent",
+  "version": "1.0.0",
+  "category": "integration",
+  "description": "Integration agent responsible for synchronizing sessions, managing agent quota thresholds, and bridging external AI agent status to the TURZX secondary monitor.",
+  "entrypoint": "agent_quota_manager:AgentQuotaManager",
+  "capabilities": [
+    "quota.check_thresholds",
+    "quota.reset_quotas",
+    "session.sync_bridge",
+    "session.cleanup_expired",
+    "telemetry.forward_to_display"
+  ],
+  "permissions": [
+    "quota:manage",
+    "session:bridge",
+    "redis:rw",
+    "display:notify"
+  ],
+  "resource_boundaries": {
+    "sync_interval_seconds": 5.0,
+    "max_tracked_agents": 256,
+    "session_expiry_hours": 24
+  },
+  "semantic_signature": {
+    "service": "turzx-integration-bridge",
+    "bridge_protocol": "hermes-deepseek-bridge",
+    "security_level": "zero-assurance",
+    "mac_auth_type": "local-process-token"
+  },
+  "governance": {
+    "zero_assumption_compliance": true,
+    "fail_closed_on_error": true,
+    "enforce_local_process_token": true
+  },
+  "dependencies": {
+    "internal": [
+      "turzx-core-agent",
+      "turzx-scheduler-agent"
+    ]
+  }
+}
