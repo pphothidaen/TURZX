@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TURXZ Smart Screen - Agent Quota Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto p-4">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold mb-2">🖥️ TURXZ Smart Screen</h1>
+            <p class="text-gray-400">Agent Quota Monitoring Dashboard</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" id="status-cards">
+            <!-- Status cards populated by JS -->
+        </div>
+
+        <div class="bg-gray-800 rounded-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Agent Quota Dashboard</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="border-b border-gray-700">
+                            <th class="pb-2">Agent ID</th>
+                            <th class="pb-2">Quota Limit</th>
+                            <th class="pb-2">Current Usage</th>
+                            <th class="pb-2">Usage %</th>
+                            <th class="pb-2">Status</th>
+                            <th class="pb-2">Last Update</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quota-table-body">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="bg-gray-800 rounded-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Quota Usage Chart</h2>
+            <canvas id="quotaChart" height="100"></canvas>
+            <canvas id="historyChart" height="200" style="display: none;"></canvas>
+        </div>
+
+        <div class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Display Sessions</h2>
+            <div class="space-y-4">
+                <div>
+                    <h3 class="font-semibold mb-2">Active Sessions</h3>
+                    <div id="sessions-list" class="text-sm text-gray-400">
+                        <p class="italic">Connecting...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const WS_BASE = 'ws://localhost:8000';
+        let quotaChart = null;
+        let historyChart = null;
+        let ws = null;
+        let agentHistory = {}; // agent_id -> [{percent, timestamp}]
+
+        // Color mapping for quota status
+        const statusColors = {
+            healthy: '#4CAF50',
+            warning: '#FF9800',
+            exceeded: '#F44336',
+            disabled: '#6B7280'
+        };
+
+        // Initialize WebSocket connection
+        function initWebSocket() {
+            ws = new WebSocket(WS_BASE + '/api/v1/turzx/display/ws');
+
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+            };
+
+            ws.onmessage = function(event) {
+                const data = event.data;
+                if (typeof data === 'object') {
+                    renderDashboard(data);
+                }
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket disconnected, reconnecting...');
+                setTimeout(initWebSocket, 3000);
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Fetch dashboard data from API
+        async function fetchDashboard() {
+            const res = await fetch(`${API_BASE}/api/v1/agent/dashboard`);
+            if (!res.ok) throw new Error('Failed to fetch');
+            return res.json();
+        }
+
+        // Render status cards
+        function renderStatusCards(data) {
+            const cardsContainer = document.getElementById('status-cards');
+            const agents = data.agents || [];
+
+            const cards = agents.map(agent => {
+                const q = agent.quota_status;
+                const statusKey = q.status === 'exhausted' ? 'exceeded' : q.status;
+                const color = statusColors[statusKey] || '#6B7280';
+                const statusText = q.status.charAt(0).toUpperCase() + q.status.slice(1);
+
+                return `
+                    <div class="bg-gray-800 rounded-lg p-4 flex flex-col">
+                        <div class="text-3xl font-bold" style="color: ${color}">${agent.agent_id}</div>
+                        <div class="mt-2">
+                            <span class="text-green-400" q>${q.usage_percent.toFixed(1)}%</span>
+                            <span class="text-xs text-gray-500 ml-2">${statusText}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            cardsContainer.innerHTML = cards ? cards : `<p class="text-gray-500">No agents connected</p>`;
+        }
+
+        // Render quota table
+        function renderTable(data) {
+            const tbody = document.getElementById('quota-table-body');
+            tbody.innerHTML = (data.agents || []).map(agent => {
+                const q = agent.quota_status;
+                const statusClass = q.status === 'healthy' ? 'text-green-400' :
+                                    q.status === 'warning' ? 'text-yellow-400' : 'text-red-400';
+                return `
+                    <tr class="border-b border-gray-700">
+                        <td class="py-2 font-mono">${agent.agent_id}</td>
+                        <td class="py-2">${q.quota_limit}</td>
+                        <td class="py-2">${q.current_usage}</td>
+                        <td class="py-2"><span class="font-bold ${statusClass}">${q.usage_percent.toFixed(1)}%</span></td>
+                        <td class="py-2"><span class="${statusClass}">${q.status.toUpperCase()}</span></td>
+                        <td class="py-2">${new Date(agent.last_update).toLocaleString()}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Update bar chart
+        function updateChart(agents) {
+            const ctx = document.getElementById('quotaChart').getContext('2d');
+            if (quotaChart) quotaChart.destroy();
+
+            quotaChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: agents.map(a => a.agent_id),
+                    datasets: [{
+                        label: 'Usage %',
+                        data: agents.map(a => a.quota_status.usage_percent),
+                        backgroundColor: agents.map(a =>
+                            a.quota_status.status === 'healthy' ? '#4CAF50' :
+                            a.quota_status.status === 'warning' ? '#FF9800' :
+                            '#F44336'
+                        ),
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, max: 100 } }
+                }
+            });
+        }
+
+        // Update historical chart for an agent
+        function updateHistoryChart(agentId, points) {
+            const history = agentHistory[agentId] || [];
+            const ctx = document.getElementById('historyChart');
+
+            // Show the history canvas
+            document.getElementById('historyChart').style.display = 'block';
+
+            if (history.length === 0) {
+                ctx.canvas.style.display = 'none';
+                return;
+            }
+
+            const timestamps = history.map(p => p.timestamp);
+            const percentages = history.map(p => p.percent);
+
+            if (historyChart) historyChart.destroy();
+
+            historyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timestamps,
+                    datasets: [{
+                        label: 'Usage % Trend',
+                        data: percentages,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, max: 100 },
+                        x: { title: { display: true, text: 'Time' } }
+                    }
+                }
+            });
+        }
+
+        // Render display sessions
+        function renderSessions(data) {
+            const sessionsList = document.getElementById('sessions-list');
+            const sessions = data.sessions || [];
+
+            if (sessions.length === 0) {
+                sessionsList.innerHTML = '<p class="italic">No active sessions</p>';
+                return;
+            }
+
+            const sessionItems = sessions.map(session => {
+                const statusColor = session.status === 'active' ? 'text-green-400' :
+                                   session.status === 'idle' ? 'text-yellow-400' : 'text-red-400';
+                return `
+                    <div class="flex justify-between items-baseline">
+                        <span class="${statusColor}">${session.agent_id}</span>
+                        <span class="text-xs text-gray-400">${session.session_id || 'unknown'}</span>
+                    </div>
+                `;
+            }).join('');
+
+            sessionsList.innerHTML = sessionItems;
+        }
+
+        // Main dashboard render
+        function renderDashboard(data) {
+            renderStatusCards(data);
+            renderTable(data);
+            updateChart(data.agents || []);
+
+            // Update historical charts for each agent
+            (data.agents || []).forEach(agent => {
+                const historyKey = `history:${agent.agent_id}`;
+                if (data.display_analytics && data.display_analytics[historyKey]) {
+                    agentHistory[agent.agent_id] = data.display_analytics[historyKey].history || [];
+                }
+                updateHistoryChart(agent.agent_id, agentHistory[agent.agent_id]);
+            });
+
+            renderSessions(data.display_analytics || {});
+        }
+
+        // Refresh function
+        async function refresh() {
+            try {
+                const data = await fetchDashboard();
+                renderDashboard(data);
+            } catch (e) {
+                console.error('Fetch failed:', e);
+            }
+        }
+
+        // Initialize on load
+        initWebSocket();
+        refresh();
+        // Set up WebSocket-driven updates with fallback polling
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>

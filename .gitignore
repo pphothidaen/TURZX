@@ -1,0 +1,90 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.egg
+*.eggs
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+.pytest_cache/
+
+# Environment
+.venv/
+env/
+ENV/
+venv/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+hidden
+
+# Temporary files
+*.tmp
+*.temp
+
+# Logs
+*.log
+log.log
+
+# Cache files
+.mypy_cache/
+
+# Distribution builds
+*.egg-info/
+*.dist-info/
+*.whl
+
+# Package manager logs
+pip-debug.log
+
+# Python profiling
+.prof
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Windows temporary files
+Thumbs.db
+
+# macOS directory metadata
+**/.DS_Store
+**/.DS_Store?
+**/._*
