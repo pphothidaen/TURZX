@@ -84,6 +84,10 @@ pip-debug.log
 # Windows temporary files
 Thumbs.db
 
+# Vendor Binaries & Generated Displays
+35inchENG/
+agent_status_display.png
+
 # macOS directory metadata
 **/.DS_Store
 **/.DS_Store?
