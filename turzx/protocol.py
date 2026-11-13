@@ -33,6 +33,7 @@ TURZX_USB_EP_IN: int = 0x82
 # Serial defaults
 TURZX_DEFAULT_BAUDRATES: Tuple[int, ...] = (115200, 9600, 19200, 38400, 57600, 230400)
 TURZX_DEFAULT_TIMEOUT: float = 1.0
+TURZX_MAX_FPS: int = 30
 
 # Aliases for backward compatibility with earlier typo "TURXZ"
 TURXZ_VID = TURZX_VID

@@ -33,6 +33,7 @@ class ExecutorConfig:
     default_timeout: float = 300.0
     default_mode: ExecutionMode = ExecutionMode.THREAD
     enable_metrics: bool = True
+    enable_resource_gating: bool = True
 
 
 class TURXZJobExecutor:
@@ -126,6 +127,37 @@ class TURXZJobExecutor:
         """
         mode = mode or self.config.default_mode
         timeout = timeout or job.timeout or self.config.default_timeout
+
+        if getattr(self.config, "enable_resource_gating", False):
+            try:
+                from turzx.power import SystemPowerManager, SystemResourceManager
+                pm = SystemPowerManager.get_instance()
+                p_mode = pm.get_power_mode()
+                if p_mode.throttle_delay > 0:
+                    time.sleep(p_mode.throttle_delay)
+
+                mem_info = pm.memory_manager.get_memory_pressure()
+                therm_info = pm.thermal_manager.get_thermal_info()
+
+                can_admit, reason = SystemResourceManager.can_admit_task(
+                    task_power=getattr(job, "power_category", "moderate"),
+                    urgency=getattr(job, "urgency", "medium"),
+                    memory_free_pct=mem_info.free_percent,
+                    thermal_temp=therm_info.temperature,
+                    power_mode=p_mode,
+                )
+                if not can_admit:
+                    logger.warning("Job throttled by resource allocation gate", job_id=job.job_id, reason=reason)
+                    res = ExecutionResult(
+                        job_id=job.job_id,
+                        success=False,
+                        error=f"ResourceAllocationGate: {reason}",
+                    )
+                    res.started_at = datetime.now()
+                    res.completed_at = datetime.now()
+                    return res
+            except Exception as e:
+                logger.debug("Resource gating check pass-through", error=str(e))
         
         if mode == ExecutionMode.SYNC:
             return self._execute_sync(job, timeout)

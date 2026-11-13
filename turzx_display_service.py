@@ -719,8 +719,12 @@ class TURZXDisplayService:
                         width=1
                     )
                     
+                    email_addr = quota.get("email", "")
                     role_lbl = quota.get("role", "")
-                    if role_lbl:
+                    if email_addr:
+                        role_short = email_addr.split("@")[0][:8]
+                        draw.text((rx + 8, ry + 6), f"{agent_id.upper()} ({role_short})", fill=(248, 250, 252), font=font_agent)
+                    elif role_lbl:
                         role_short = role_lbl.split()[0].replace("/", "")[:10]
                         draw.text((rx + 8, ry + 6), f"{agent_id.upper()} ({role_short})", fill=(248, 250, 252), font=font_agent)
                     else:
@@ -781,12 +785,24 @@ class TURZXDisplayService:
                     )
                     
                     # Line 1: Agent Name & Quota usage details
+                    email_addr = quota.get("email", "")
                     role_lbl = quota.get("role", "")
-                    if role_lbl:
+                    if email_addr:
+                        agent_title = f"{agent_id.upper()} · {email_addr}"
+                    elif role_lbl:
                         role_short = role_lbl.split()[0].replace("/", "")[:10]
                         agent_title = f"{agent_id.upper()} ({role_short})"
                     else:
                         agent_title = agent_id.upper()
+
+                    title_bbox = draw.textbbox((14, y_pos + 6), agent_title, font=font_agent)
+                    if title_bbox[2] > width - 76:
+                        for i in range(len(agent_title) - 1, 0, -1):
+                            trunc_title = agent_title[:i] + "..."
+                            if draw.textbbox((14, y_pos + 6), trunc_title, font=font_agent)[2] <= width - 76:
+                                agent_title = trunc_title
+                                break
+
                     draw.text((14, y_pos + 6), agent_title, fill=(248, 250, 252), font=font_agent)
                     
                     current_u = quota.get("current_usage", used_pct)

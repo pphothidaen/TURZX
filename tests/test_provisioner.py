@@ -79,18 +79,50 @@ def test_add_codex_agent_dynamic(tmp_path: Path):
     new_codex = prov.add_agent(
         cluster="codex",
         name="CODEX4 (Performance)",
-        preset="claude_heavy",
+        preset="codex_standard",
     )
 
     assert new_codex["id"] == "codex4"
     assert new_codex["is_dynamic"] is True
-    assert new_codex["claude_reqs_limit"] == PRESETS["claude_heavy"]["claude_reqs"]
+    assert new_codex["claude_reqs_limit"] == 0
+    assert new_codex["gemini_tokens_limit"] == 0
+    assert new_codex["argon_units_limit"] == 0
+    assert new_codex["model"] == "gpt-5.6-terra"
+    assert new_codex["preset"] == "codex_standard"
 
     # Verify workspace directory and SQLite DB provisioned
     ws_dir = acc_dir / "codex" / "account4"
     assert ws_dir.exists()
     assert (ws_dir / "config.toml").exists()
     assert (ws_dir / "state.db").exists()
+
+
+def test_codex_agent_cannot_have_claude_argon_gemini_even_if_requested(tmp_path: Path):
+    """Verify that even if an invalid preset or custom quotas specifying claude/gemini are passed,
+    Codex agent strictly enforces zero claude, argon, gemini and OpenAI model."""
+    reg_file = tmp_path / "registry.json"
+    acc_dir = tmp_path / "accounts"
+    prov = AgentProvisioner(registry_path=str(reg_file), accounts_root=str(acc_dir))
+
+    cdx = prov.add_agent(
+        cluster="codex",
+        name="CODEX4 (Secured)",
+        preset="claude_heavy",
+        custom_quotas={"claude_reqs": 100, "gemini_tokens": 500_000, "argon_units": 50, "model": "claude-opus-5-5"},
+    )
+    assert cdx["claude_reqs_limit"] == 0
+    assert cdx["gemini_tokens_limit"] == 0
+    assert cdx["argon_units_limit"] == 0
+    assert cdx["preset"] == "codex_standard"
+    assert cdx["model"] == "gpt-5.6-terra"
+
+    # Test update_agent_quotas prevents setting claude/argon/gemini
+    prov.update_agent_quotas(cdx["id"], {"claude_reqs": 99, "gemini_tokens": 999, "argon_units": 99, "model": "gemini-pro"})
+    updated = [a for a in prov.get_cluster_agents("codex") if a["id"] == cdx["id"]][0]
+    assert updated["claude_reqs_limit"] == 0
+    assert updated["gemini_tokens_limit"] == 0
+    assert updated["argon_units_limit"] == 0
+    assert updated["model"] == "gpt-5.6-terra"
 
 
 def test_custom_quotas(tmp_path: Path):
@@ -176,7 +208,7 @@ def test_remove_dynamic_agent_purges_directory(tmp_path: Path, monkeypatch):
     assert str(pid_file) in notifications
 
     # Add dynamic Codex agent (account4)
-    dyn_cdx = prov.add_agent(cluster="codex", name="CODEX4 Dynamic", preset="claude_heavy")
+    dyn_cdx = prov.add_agent(cluster="codex", name="CODEX4 Dynamic", preset="codex_standard")
     cdx_ws = acc_dir / "codex" / f"account{dyn_cdx['account_idx']}"
     assert cdx_ws.exists()
     assert (cdx_ws / "config.toml").exists()

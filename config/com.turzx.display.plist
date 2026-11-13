@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.turzx.display</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/kimlenglim/Project/TURZX/.venv/bin/python</string>
+        <string>-u</string>
+        <string>/Users/kimlenglim/Project/TURZX/scripts/ensure_remote_hub.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/kimlenglim/Project/TURZX</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/kimlenglim/Project/TURZX/.venv/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONPATH</key>
+        <string>/Users/kimlenglim/Project/TURZX</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/kimlenglim/Library/Logs/turzx-display.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/kimlenglim/Library/Logs/turzx-display.log</string>
+</dict>
+</plist>

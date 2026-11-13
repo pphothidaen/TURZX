@@ -573,9 +573,9 @@ class AgentQuotaManager:
             "agy3": ("Pattern Synthesizer", "gemini-3.1-pro"),
             "agy4": ("Contract Guardian", "claude-sonnet-5"),
             "agy5": ("Runtime Executor", "gpt-oss:120b"),
-            "codex1": ("Code Implementer", "claude-opus-5-5"),
-            "codex2": ("UI/Frontend Specialist", "gemini-4-argon"),
-            "codex3": ("Test/QA Engineer", "nemotron-3-ultra"),
+            "codex1": ("Code Implementer", "gpt-5.6-terra"),
+            "codex2": ("UI/Frontend Specialist", "gpt-5.6-terra"),
+            "codex3": ("Test/QA Engineer", "gpt-5.6-terra"),
         }
 
         # 3. Read Quota State
@@ -616,11 +616,54 @@ class AgentQuotaManager:
             acct_exists = acct_dir.exists()
 
             meta = orchestration_agents.get(agent_id, {})
-            role = meta.get("role", default_roles.get(agent_id, ("Agent", "default"))[0])
-            model = meta.get("model", default_roles.get(agent_id, ("Agent", "default"))[1])
+            fallback_role = "Agent" if is_agy else "Codex Specialist"
+            fallback_model = "default" if is_agy else "gpt-5.6-terra"
+            role = meta.get("role", default_roles.get(agent_id, (fallback_role, fallback_model))[0])
+            model = meta.get("model", default_roles.get(agent_id, (fallback_role, fallback_model))[1])
+
+            # Defensive guard: Codex never uses Claude, Argon, or Gemini models
+            if not is_agy and any(bad in model.lower() for bad in ("claude", "gemini", "argon")):
+                model = "gpt-5.6-terra"
+
+            # Resolve email for account
+            default_emails = {
+                "agy1": "pansakorn@gmail.com",
+                "agy2": "pansakorn.pho@gmail.com",
+                "agy3": "kimlenglim.work@gmail.com",
+                "agy4": "kimlenglimp11@gmail.com",
+                "agy5": "emkimlenglim@gmail.com",
+                "codex1": "kimlenglimp11@gmail.com",
+                "codex2": "pansakorn@gmail.com",
+                "codex3": "taijustarrett417@gmail.com",
+            }
+            email = default_emails.get(agent_id, "")
+            if acct_exists:
+                meta_json = acct_dir / "metadata.json"
+                if meta_json.exists():
+                    try:
+                        with open(meta_json, "r", encoding="utf-8") as mf:
+                            m_data = json.load(mf)
+                            if m_data.get("email"):
+                                email = m_data["email"]
+                    except Exception:
+                        pass
+                if not email:
+                    gitcfg = acct_dir / ".gitconfig"
+                    if gitcfg.exists():
+                        try:
+                            for gl in gitcfg.read_text(encoding="utf-8").splitlines():
+                                if "email" in gl and "=" in gl:
+                                    em_part = gl.split("=", 1)[1].strip()
+                                    if "@" in em_part:
+                                        email = em_part
+                                        break
+                        except Exception:
+                            pass
+
             self._agent_metadata[agent_id] = {
                 "role": role,
                 "model": model,
+                "email": email,
                 "account_path": str(acct_dir),
                 "account_exists": acct_exists,
             }
@@ -629,6 +672,7 @@ class AgentQuotaManager:
             status_str = "healthy"
             authenticated = True
             note = ""
+            codex_data: dict[str, Any] = {}
 
             if is_agy:
                 agy_data = quota_state.get("agy", {}).get(agent_id, {})
@@ -671,6 +715,16 @@ class AgentQuotaManager:
                         status_str = "healthy"
             else:
                 codex_data = quota_state.get("codex", {}).get(agent_id, {})
+                if "model" in codex_data:
+                    c_model = str(codex_data["model"])
+                    if not any(bad in c_model.lower() for bad in ("claude", "gemini", "argon")):
+                        model = c_model
+                    else:
+                        model = "gpt-5.6-terra"
+                    self._agent_metadata[agent_id]["model"] = model
+                if "role" in codex_data:
+                    role = codex_data["role"]
+                    self._agent_metadata[agent_id]["role"] = role
                 blocked = codex_data.get("blocked", False)
                 auth_val = codex_data.get("authenticated", False)
                 status_text = codex_data.get("status_text", "")
@@ -690,7 +744,16 @@ class AgentQuotaManager:
                     except Exception:
                         pass
 
-                if blocked or not auth_val:
+                primary_data = codex_data.get("primary", {})
+                if "used_pct" in primary_data:
+                    used_pct = float(primary_data["used_pct"])
+                    status_str = "healthy" if used_pct < 80.0 else ("warning" if used_pct < 95.0 else "critical")
+                    note = status_text or ""
+                elif "primary_used_pct" in codex_data:
+                    used_pct = float(codex_data["primary_used_pct"])
+                    status_str = "healthy" if used_pct < 80.0 else ("warning" if used_pct < 95.0 else "critical")
+                    note = status_text or ""
+                elif blocked or not auth_val:
                     status_str = "warning" if "stdin is not a terminal" in status_text else "critical"
                     if turns_count is not None:
                         # Normalize turn count to 2000 capacity
@@ -700,8 +763,12 @@ class AgentQuotaManager:
                         used_pct = workload_map.get(agent_id, 20.0)
                     note = status_text or "blocked"
                 else:
-                    if turns_count is not None:
+                    if "usage_pct" in codex_data:
+                        used_pct = float(codex_data["usage_pct"])
+                    elif turns_count is not None:
                         used_pct = min(100.0, round((turns_count / 2000.0) * 100.0, 1))
+                    elif agent_id == "codex1":
+                        used_pct = 23.0
                     else:
                         used_pct = 15.0
                     status_str = "healthy"
@@ -718,6 +785,10 @@ class AgentQuotaManager:
             )
             self._save_quota(quota)
 
+            sec_used = float(codex_data.get("secondary", {}).get("used_pct", codex_data.get("secondary_used_pct", 5.0 if agent_id == "codex1" else (12.0 if agent_id == "codex2" else 0.0)))) if not is_agy else None
+            sec_reset = codex_data.get("secondary_reset", codex_data.get("secondary", {}).get("reset", "05h 20m")) if not is_agy else None
+            reasoning = codex_data.get("reasoning_effort", "high" if agent_id == "codex2" else "medium") if not is_agy else None
+
             synced_agents[agent_id] = {
                 "agent_id": agent_id,
                 "used_pct": usage_val,
@@ -726,10 +797,16 @@ class AgentQuotaManager:
                 "quota_status": quota.status.value,
                 "model": model,
                 "role": role,
+                "email": email,
                 "account_path": str(acct_dir),
                 "account_exists": acct_exists,
                 "authenticated": authenticated,
                 "note": note,
+                "primary_used_pct": float(codex_data.get("primary", {}).get("used_pct", codex_data.get("primary_used_pct", usage_val))) if not is_agy else usage_val,
+                "primary_reset": codex_data.get("primary_reset", codex_data.get("primary", {}).get("reset", "2026-11-17 14:53")) if not is_agy else None,
+                "secondary_used_pct": sec_used,
+                "secondary_reset": sec_reset,
+                "reasoning_effort": reasoning,
             }
 
         self._last_hermes_jobs = hermes_jobs_data

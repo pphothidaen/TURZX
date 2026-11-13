@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 from .driver import TURZXDriver
 from .image_utils import create_test_pattern
 from .protocol import TURZXError
+from .power import BrightnessProfile, compute_clamped_brightness, get_macbook_brightness
 
 
 def parse_color(val: str) -> Tuple[int, int, int]:
@@ -169,9 +170,43 @@ def cmd_clear(args: argparse.Namespace) -> int:
 
 
 def cmd_brightness(args: argparse.Namespace) -> int:
-    """Set screen brightness level."""
-    if not (0 <= args.level <= 100):
-        print(f"❌ Error: Brightness must be in range 0-100, got {args.level}", file=sys.stderr)
+    """Set screen brightness level, adaptive profile, or auto-sync with MacBook screen."""
+    profile_arg = getattr(args, "profile", None)
+    auto_arg = getattr(args, "auto", False)
+    level = getattr(args, "level", None)
+    prof_desc = ""
+
+    if auto_arg:
+        host_b = get_macbook_brightness()
+        if host_b is None:
+            print("❌ Error: Unable to query host display brightness via native DisplayServices.", file=sys.stderr)
+            return 1
+        level = compute_clamped_brightness(host_b, min_clamp=15, max_clamp=85)
+        prof_desc = f" [Auto: MacBook host {int(round(host_b * 100))}% -> clamped {level}%]"
+    elif profile_arg:
+        profile_map = {
+            "work": BrightnessProfile.WORK_ENVIRONMENT,
+            "work_environment": BrightnessProfile.WORK_ENVIRONMENT,
+            "deep_work": BrightnessProfile.DEEP_WORK,
+            "deep": BrightnessProfile.DEEP_WORK,
+            "presentation": BrightnessProfile.PRESENTATION,
+            "present": BrightnessProfile.PRESENTATION,
+            "idle": BrightnessProfile.IDLE,
+            "off": BrightnessProfile.OFF,
+        }
+        prof = profile_map.get(profile_arg.lower())
+        if not prof:
+            print(f"❌ Error: Unknown profile '{profile_arg}'. Choices: work_environment, deep_work, presentation", file=sys.stderr)
+            return 1
+        level = prof.default_brightness
+        prof_desc = f" [Profile: {profile_arg}]"
+
+    if level is None:
+        print("❌ Error: Specify brightness percentage (0-100), --profile, or --auto", file=sys.stderr)
+        return 1
+
+    if not (0 <= level <= 100):
+        print(f"❌ Error: Brightness must be in range 0-100, got {level}", file=sys.stderr)
         return 1
 
     driver = get_driver_from_args(args)
@@ -179,11 +214,55 @@ def cmd_brightness(args: argparse.Namespace) -> int:
         print("❌ Error: Failed to connect to display.", file=sys.stderr)
         return 1
     try:
-        driver.set_brightness(args.level)
-        print(f"✓ Display brightness set to {args.level}%")
+        driver.set_brightness(level)
+        print(f"✓ Display brightness set to {level}%{prof_desc}")
         return 0
     finally:
         driver.disconnect()
+
+
+def cmd_power_mode(args: argparse.Namespace) -> int:
+    """Set or inspect system-wide adaptive power mode."""
+    from .power import SystemPowerManager, PowerMode
+    pm = SystemPowerManager.get_instance()
+    mode_str = getattr(args, "mode", None)
+    if not mode_str:
+        telemetry = pm.get_system_telemetry()
+        print("=== TURZX Adaptive Power & Resource Status ===")
+        print(f"  Active Mode:       {telemetry['power_mode'].upper()} ({telemetry['capacity_percent']}%)")
+        print(f"  Max Concurrency:   {telemetry['max_concurrency']} workers")
+        print(f"  Memory Free:       {telemetry['memory']['free_percent']}% (Critical: {telemetry['memory']['is_critical']})")
+        print(f"  Thermal State:     {telemetry['thermal']['state'].upper()} ({telemetry['thermal']['temperature']}°C)")
+        print(f"  Display Profile:   {telemetry['display']['profile']} ({telemetry['display']['brightness']}%)")
+        print(f"  File Descriptors:  soft={telemetry['resource_limits']['nofile_soft']}, hard={telemetry['resource_limits']['nofile_hard']}")
+        return 0
+
+    try:
+        new_mode = PowerMode(mode_str.lower())
+    except ValueError:
+        print(f"❌ Error: Invalid power mode '{mode_str}'. Choices: maximum, balanced, efficient, minimum", file=sys.stderr)
+        return 1
+
+    driver = None
+    try:
+        driver = get_driver_from_args(args)
+        if not driver.connect():
+            driver = None
+    except Exception:
+        driver = None
+
+    try:
+        pm.set_power_mode(new_mode, token=getattr(args, "token", None), driver=driver)
+        print(f"✓ Power mode switched to {new_mode.value.upper()} ({new_mode.capacity_percent}% capacity)")
+        print(f"  Default Brightness: {new_mode.default_brightness}%")
+        print(f"  Max Concurrency:    {new_mode.max_concurrency()} workers")
+        return 0
+    finally:
+        if driver:
+            try:
+                driver.disconnect()
+            except Exception:
+                pass
 
 
 def cmd_orientation(args: argparse.Namespace) -> int:
@@ -294,8 +373,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Color to clear to (e.g. #000000, black, red, 255,0,0)")
 
     # brightness
-    p_bright = subparsers.add_parser("brightness", parents=[common_parser], help="Set display brightness (0-100)")
-    p_bright.add_argument("level", type=int, help="Brightness percentage (0-100)")
+    p_bright = subparsers.add_parser("brightness", parents=[common_parser], help="Set display brightness (0-100) or profile")
+    p_bright.add_argument("level", type=int, nargs="?", default=None, help="Brightness percentage (0-100)")
+    p_bright.add_argument("--profile", choices=["work_environment", "work", "deep_work", "deep", "presentation", "present"],
+                          help="Preset brightness profile")
+    p_bright.add_argument("--auto", action="store_true", default=False,
+                          help="Auto-adjust brightness based on MacBook screen brightness (15-85%% clamp)")
 
     # orientation
     p_orient = subparsers.add_parser("orientation", parents=[common_parser], help="Set display orientation (0-3)")
@@ -310,6 +393,15 @@ def build_parser() -> argparse.ArgumentParser:
     # power
     p_power = subparsers.add_parser("power", parents=[common_parser], help="Control display panel power state")
     p_power.add_argument("state", choices=["on", "off"], help="'on' or 'off'")
+
+    # power-mode
+    p_power_mode = subparsers.add_parser("power-mode", parents=[common_parser], help="Configure or view adaptive power mode")
+    p_power_mode.add_argument("mode", nargs="?", choices=["maximum", "balanced", "efficient", "minimum"],
+                              help="Target power mode (default: inspect status)")
+    p_power_mode.add_argument("--token", help="Local process token for authentication")
+
+    # resource-status
+    subparsers.add_parser("resource-status", parents=[common_parser], help="Inspect system power & resource telemetry")
 
     # reset
     subparsers.add_parser("reset", parents=[common_parser], help="Hardware reset display controller")
@@ -334,6 +426,8 @@ def main(argv=None) -> int:
         "orientation": cmd_orientation,
         "test": cmd_test,
         "power": cmd_power,
+        "power-mode": cmd_power_mode,
+        "resource-status": cmd_power_mode,
         "reset": cmd_reset,
     }
 

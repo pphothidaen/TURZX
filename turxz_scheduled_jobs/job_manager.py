@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Union
 
 from ._logger import get_logger
 
@@ -33,6 +33,21 @@ class JobPriority(str, Enum):
     CRITICAL = "critical"
 
 
+class TaskPowerCategory(str, Enum):
+    """Categorization of jobs by power consumption."""
+    POWER_CRITICAL = "power_critical"
+    MODERATE = "moderate"
+    LOW = "low"
+
+
+class TaskUrgency(str, Enum):
+    """Task urgency levels for resource allocation."""
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 @dataclass
 class JobDefinition:
     """Definition of a job to be executed."""
@@ -43,6 +58,8 @@ class JobDefinition:
     kwargs: dict[str, Any] = field(default_factory=dict)
     timeout: float = 300.0  # 5 minutes default
     priority: JobPriority = JobPriority.NORMAL
+    power_category: Union[TaskPowerCategory, str] = TaskPowerCategory.MODERATE
+    urgency: Union[TaskUrgency, str] = TaskUrgency.MEDIUM
     retries: int = 0
     retry_delay: float = 1.0
     metadata: dict[str, Any] = field(default_factory=dict)

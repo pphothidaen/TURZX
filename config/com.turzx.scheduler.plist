@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.turzx.scheduler</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/kimlenglim/Project/TURZX/.venv/bin/python</string>
+        <string>-m</string>
+        <string>turxz_scheduled_jobs.cli</string>
+        <string>start</string>
+        <string>--foreground</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/kimlenglim/Project/TURZX</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/kimlenglim/Project/TURZX</string>
+        <key>TURXZ_SCHEDULER_CONFIG</key>
+        <string>/Users/kimlenglim/Project/TURZX/config/scheduler.json</string>
+    </dict>
+
+    <!-- Resource Limits per Specification (Requirement 3) -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <!-- Number of Files: ulimit -n 65536 -->
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+        <!-- Number of Processes limit -->
+        <key>NumberOfProcesses</key>
+        <integer>2048</integer>
+        <!-- Core file / directory limit -->
+        <key>Core</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>HardResourceLimits</key>
+    <dict>
+        <!-- Number of Files: hard limit 65536 -->
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+        <!-- Number of Processes hard limit -->
+        <key>NumberOfProcesses</key>
+        <integer>2048</integer>
+        <!-- Core file / directory limit -->
+        <key>Core</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/kimlenglim/Library/Logs/hermes/turzx-scheduler.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/kimlenglim/Library/Logs/hermes/turzx-scheduler-err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+</dict>
+</plist>

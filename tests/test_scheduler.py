@@ -987,5 +987,128 @@ class TestProcessTokenAuth:
         assert "TURXZ_PROCESS_TOKEN" not in os.environ
 
 
+class TestHealthChecksPowerAndMemory:
+    """Test memory pressure and thermal health checks in scheduler."""
+
+    def test_memory_usage_check_with_high_pressure(self):
+        from unittest.mock import patch
+        from turxz_scheduled_jobs.health import HealthStatus, MemoryUsageCheck
+        from turzx.power import MemoryPressureInfo
+
+        check = MemoryUsageCheck(threshold_percent=90.0)
+        # Mock high memory pressure: 15% free RAM (< 20% threshold)
+        mock_info = MemoryPressureInfo(free_percent=15.0, is_critical=True)
+
+        with patch("turzx.power.SystemMemoryManager.get_memory_pressure", return_value=mock_info):
+            result = check.check()
+            assert result.status == HealthStatus.UNHEALTHY
+            assert "High memory pressure" in result.message
+
+    def test_thermal_health_check_states(self):
+        from turxz_scheduled_jobs.health import HealthStatus, ThermalHealthCheck
+        from turzx.power import SystemPowerManager
+
+        pm = SystemPowerManager.get_instance()
+        check = ThermalHealthCheck()
+
+        # Normal (60°C)
+        pm.thermal_manager.set_simulated_temperature(60.0)
+        res_norm = check.check()
+        assert res_norm.status == HealthStatus.HEALTHY
+
+        # Moderate (> 75°C)
+        pm.thermal_manager.set_simulated_temperature(78.0)
+        res_mod = check.check()
+        assert res_mod.status == HealthStatus.DEGRADED
+
+        # Critical (> 85°C)
+        pm.thermal_manager.set_simulated_temperature(92.0)
+        res_crit = check.check()
+        assert res_crit.status == HealthStatus.UNHEALTHY
+
+        # Reset
+        pm.thermal_manager.set_simulated_temperature(None)
+
+    def test_power_mode_health_check(self):
+        from turxz_scheduled_jobs.health import HealthStatus, PowerModeHealthCheck
+        from turzx.power import PowerMode, SystemPowerManager
+
+        pm = SystemPowerManager.get_instance()
+        pm.set_power_mode(PowerMode.BALANCED)
+
+        check = PowerModeHealthCheck()
+        res = check.check()
+        assert res.status == HealthStatus.HEALTHY
+        assert "balanced" in res.message.lower()
+
+
+class TestExecutorResourceGating:
+    """Test job executor dynamic resource allocation and throttling."""
+
+    def test_executor_throttles_power_critical_task_under_memory_pressure(self):
+        from unittest.mock import patch
+        from turxz_scheduled_jobs.executor import TURXZJobExecutor
+        from turxz_scheduled_jobs.job_manager import JobDefinition, TaskPowerCategory, TaskUrgency
+        from turzx.power import MemoryPressureInfo, PowerMode, SystemPowerManager
+
+        pm = SystemPowerManager.get_instance()
+        pm.set_power_mode(PowerMode.BALANCED)
+
+        executor = TURXZJobExecutor(max_workers=2)
+        called = False
+
+        def heavy_task():
+            nonlocal called
+            called = True
+            return "done"
+
+        job = JobDefinition(
+            job_id="heavy_ai_job",
+            name="Heavy AI Task",
+            handler=heavy_task,
+            power_category=TaskPowerCategory.POWER_CRITICAL,
+            urgency=TaskUrgency.LOW,
+        )
+
+        # Mock high memory pressure: 14% free RAM (< 20%)
+        mock_mem = MemoryPressureInfo(free_percent=14.0, is_critical=True)
+        with patch.object(pm.memory_manager, "get_memory_pressure", return_value=mock_mem):
+            result = executor.execute(job)
+            assert not result.success
+            assert "ResourceAllocationGate" in str(result.error)
+            assert not called  # Task was throttled / never run
+
+    def test_executor_throttles_under_critical_thermal(self):
+        from turxz_scheduled_jobs.executor import TURXZJobExecutor
+        from turxz_scheduled_jobs.job_manager import JobDefinition, TaskPowerCategory, TaskUrgency
+        from turzx.power import SystemPowerManager
+
+        pm = SystemPowerManager.get_instance()
+        pm.thermal_manager.set_simulated_temperature(91.0)  # > 85°C
+
+        executor = TURXZJobExecutor(max_workers=2)
+        called = False
+
+        def task():
+            nonlocal called
+            called = True
+
+        job = JobDefinition(
+            job_id="thermal_heavy_job",
+            name="Thermal Heavy Task",
+            handler=task,
+            power_category=TaskPowerCategory.POWER_CRITICAL,
+            urgency=TaskUrgency.MEDIUM,
+        )
+
+        try:
+            result = executor.execute(job)
+            assert not result.success
+            assert "ResourceAllocationGate" in str(result.error)
+            assert not called
+        finally:
+            pm.thermal_manager.set_simulated_temperature(None)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

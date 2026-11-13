@@ -177,6 +177,22 @@ class TURXZSchedulerCLI:
             ),
             metadata={"description": "Collect system metrics"},
         )
+
+        # System Power & Thermal Optimization job - runs every 60 seconds
+        self.scheduler.add_job(
+            name="power_thermal_optimization",
+            schedule_type=ScheduleType.INTERVAL,
+            schedule_value=60.0,  # 1 minute
+            job_definition=JobDefinition(
+                job_id="power_thermal_optimization",
+                name="Power & Thermal Optimization",
+                handler=self._optimize_system_power,
+                timeout=30.0,
+                priority=JobPriority.NORMAL,
+                tags=["power", "thermal", "memory", "optimization"],
+            ),
+            metadata={"description": "Monitor thermal thresholds, memory pressure, and optimize power mode"},
+        )
         
         # Cleanup old execution history - runs daily at startup
         self.scheduler.add_job(
@@ -261,6 +277,19 @@ class TURXZSchedulerCLI:
             removed = self.job_manager.clear_history()
             return {"status": "ok", "removed_entries": removed}
         return {"status": "skipped", "reason": "job_manager not available"}
+
+    def _optimize_system_power(self) -> dict[str, Any]:
+        """Evaluate memory pressure, thermal limits, and adaptive power mode."""
+        try:
+            from turzx.power import SystemPowerManager
+            pm = SystemPowerManager.get_instance()
+            adapted_mode = pm.evaluate_adaptive_power_mode()
+            telemetry = pm.get_system_telemetry()
+            logger.info("Power and thermal optimization evaluated", mode=adapted_mode.value)
+            return telemetry
+        except Exception as e:
+            logger.error("System power optimization check failed", error=str(e))
+            raise
     
     def _on_shutdown(self) -> None:
         """Shutdown callback."""

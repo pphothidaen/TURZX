@@ -38,6 +38,22 @@ LOG_FILE="$LOG_DIR/turzx-display.log"
 
 log() { /bin/echo "[$(/bin/date '+%H:%M:%S')] [TURZX-Bridge] $*"; }
 
+# System Resource Limit (Requirement 3: ulimit -n 65536)
+ensure_resource_limits() {
+    ulimit -n 65536 2>/dev/null || true
+}
+
+# Memory Pressure Check (Requirement 1: awk-based check, threshold 20% free RAM)
+check_memory_pressure() {
+    if command -v memory_pressure >/dev/null 2>&1; then
+        if [ $(memory_pressure | awk '/System-wide memory free percentage:/ {gsub("%",""); print ($NF < 20) ? 1 : 0}') -eq 1 ]; then
+            log "⚠️ High memory pressure detected (< 20% free RAM). Throttling display and scaling resources."
+            return 1
+        fi
+    fi
+    return 0
+}
+
 is_hardware_connected() {
     # Check for Turing 3.5" USB controller (0x1A86:0x5722)
     if /usr/sbin/system_profiler SPUSBDataType 2>/dev/null | grep -q "0x1a86"; then
@@ -52,6 +68,7 @@ is_hardware_connected() {
 start_display() {
     log "Initiating TURZX display autostart..."
     mkdir -p "$LOG_DIR"
+    ensure_resource_limits
 
     # Check if already running
     if [[ -f "$PID_FILE" ]] && kill -0 "$(<"$PID_FILE")" 2>/dev/null; then
@@ -65,14 +82,21 @@ start_display() {
         return 0
     fi
 
+    # Adaptive power & resource scaling based on memory pressure
+    local power_args=(--interval 10 --brightness 60 --profile work_environment --idle-timeout 300 --dim-brightness 15 --auto-brightness --auto-screen-off)
+    if ! check_memory_pressure; then
+        log "Enforcing EFFICIENT power mode and throttled cadence due to memory pressure."
+        power_args=(--interval 20 --brightness 40 --power-mode efficient --idle-timeout 180 --dim-brightness 10 --auto-brightness --auto-screen-off)
+    fi
+
     log "Hardware detected. Starting Carousel in background..."
     (
         cd "$TURZX_DIR"
-        exec "$PYTHON_BIN" -u "$CAROUSEL_SCRIPT" --interval 10 --brightness 80 >> "$LOG_FILE" 2>&1
-    ) &
-    local pid=$!
-    echo "$pid" > "$PID_FILE"
-    disown "$pid" 2>/dev/null || true
+        nohup "$PYTHON_BIN" -u "$CAROUSEL_SCRIPT" "${power_args[@]}" >> "$LOG_FILE" 2>&1 &
+        echo $! > "$PID_FILE"
+    )
+    local pid
+    pid="$(<"$PID_FILE")"
     
     # Wait briefly to confirm start
     sleep 1.5
@@ -192,14 +216,45 @@ uninstall_hook() {
 }
 
 case "${1:-status}" in
-    start)     start_display ;;
-    stop)      stop_display ;;
-    restart)   stop_display; sleep 1; start_display ;;
-    status)    show_status ;;
-    install)   install_hook ;;
-    uninstall) uninstall_hook ;;
+    start)      start_display ;;
+    stop)       stop_display ;;
+    restart)    stop_display; sleep 1; start_display ;;
+    status)     show_status ;;
+    power)
+        if [[ -n "${2:-}" ]]; then
+            "$PYTHON_BIN" -m turzx.cli power-mode "$2"
+        else
+            "$PYTHON_BIN" -m turzx.cli power-mode
+        fi
+        ;;
+    brightness)
+        if [[ -n "${2:-}" ]]; then
+            "$PYTHON_BIN" -m turzx.cli brightness "$2"
+        else
+            "$PYTHON_BIN" -m turzx.cli brightness --profile work_environment
+        fi
+        ;;
+    memory)
+        if command -v memory_pressure >/dev/null 2>&1; then
+            free_pct=$(memory_pressure | awk '/System-wide memory free percentage:/ {gsub("%",""); print $NF}')
+            echo "macOS System-wide Free Memory: ${free_pct}%"
+            if [ $(memory_pressure | awk '/System-wide memory free percentage:/ {gsub("%",""); print ($NF < 20) ? 1 : 0}') -eq 1 ]; then
+                echo "Status: HIGH MEMORY PRESSURE (<20% free RAM) -> Throttling Active"
+            else
+                echo "Status: HEALTHY (>=20% free RAM)"
+            fi
+        else
+            echo "memory_pressure command not found on host"
+        fi
+        ;;
+    limits)
+        ensure_resource_limits
+        echo "File descriptor limits: $(ulimit -n)"
+        ;;
+    install)    install_hook ;;
+    uninstall)  uninstall_hook ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|install|uninstall}"
+        echo "Usage: $0 {start|stop|restart|status|power [mode]|brightness [level]|memory|limits|install|uninstall}"
         exit 1
         ;;
 esac

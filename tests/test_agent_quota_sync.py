@@ -117,9 +117,9 @@ def mock_hermes_env(tmp_path):
             "agy3": {"role": "Pattern Synthesizer", "model": "gemini-3.1-pro"},
             "agy4": {"role": "Contract Guardian", "model": "claude-sonnet-5@azure"},
             "agy5": {"role": "Runtime Executor", "model": "gpt-oss:120b"},
-            "codex1": {"role": "Code Implementer", "model": "claude-opus-5-5@azure"},
-            "codex2": {"role": "UI/Frontend Specialist", "model": "gemini-4-argon"},
-            "codex3": {"role": "Test/QA Engineer", "model": "nemotron-3-ultra-550b"},
+            "codex1": {"role": "Code Implementer", "model": "gpt-5.6-terra"},
+            "codex2": {"role": "UI/Frontend Specialist", "model": "gpt-5.6-terra"},
+            "codex3": {"role": "Test/QA Engineer", "model": "gpt-5.6-terra"},
         },
     }
     with open(orch_dir / "TURZX_ORCHESTRATION_STATE.json", "w", encoding="utf-8") as f:
@@ -340,7 +340,7 @@ class TestTURZXDisplayServiceDashboard:
                 "remaining_pct": 55.0,
                 "status": "warning",
                 "role": "UI/Frontend Specialist",
-                "model": "gemini-4-argon",
+                "model": "gpt-5.6-terra",
                 "current_usage": 45.0,
                 "quota_limit": 100.0,
             }

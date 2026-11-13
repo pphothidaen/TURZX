@@ -3,6 +3,8 @@ TURXZ Scheduler Health Checks - Health monitoring for the scheduler system.
 """
 
 import asyncio
+import os
+import platform
 import shutil
 import threading
 import time
@@ -267,7 +269,7 @@ class DiskSpaceCheck(HealthCheck):
 
 
 class MemoryUsageCheck(HealthCheck):
-    """Check memory usage."""
+    """Check memory usage and memory pressure."""
     
     def __init__(self, threshold_percent: float = 90.0, timeout: float = 5.0):
         super().__init__("memory_usage", timeout)
@@ -276,54 +278,72 @@ class MemoryUsageCheck(HealthCheck):
     def check(self) -> HealthCheckResult:
         started = time.time()
         try:
-            # Try to get memory info
+            used_percent = 0.0
+            details: dict[str, Any] = {"threshold_percent": self.threshold_percent}
+            # 1. Try psutil
             try:
                 import psutil
                 mem = psutil.virtual_memory()
                 used_percent = mem.percent
-                details = {
+                details.update({
                     "total_mb": round(mem.total / (1024**2), 2),
                     "available_mb": round(mem.available / (1024**2), 2),
                     "used_mb": round(mem.used / (1024**2), 2),
                     "used_percent": round(used_percent, 2),
-                    "threshold_percent": self.threshold_percent,
-                }
+                })
             except ImportError:
-                # Fallback: read from /proc/meminfo on Linux
-                used_percent = 0
-                details = {"note": "psutil not available, using fallback"}
-                try:
-                    with open('/proc/meminfo', 'r') as f:
-                        meminfo = {}
-                        for line in f:
-                            if ':' in line:
-                                key, val = line.split(':', 1)
-                                meminfo[key.strip()] = val.strip()
-                        
-                        total = int(meminfo.get('MemTotal', '0').split()[0]) * 1024
-                        available = int(meminfo.get('MemAvailable', '0').split()[0]) * 1024
-                        used = total - available
-                        used_percent = (used / total) * 100 if total > 0 else 0
-                        
-                        details = {
-                            "total_mb": round(total / (1024**2), 2),
-                            "available_mb": round(available / (1024**2), 2),
-                            "used_mb": round(used / (1024**2), 2),
+                # 2. Try Darwin memory_pressure tool
+                is_darwin = platform.system().lower() == "darwin"
+                darwin_checked = False
+                if is_darwin:
+                    try:
+                        from turzx.power import SystemMemoryManager
+                        mem_info = SystemMemoryManager().get_memory_pressure()
+                        used_percent = max(0.0, 100.0 - mem_info.free_percent)
+                        details.update({
+                            "free_percent": mem_info.free_percent,
                             "used_percent": round(used_percent, 2),
-                            "threshold_percent": self.threshold_percent,
-                        }
-                except Exception:
-                    pass
+                            "is_critical": mem_info.is_critical,
+                            "method": "darwin_memory_pressure",
+                        })
+                        darwin_checked = True
+                    except Exception:
+                        darwin_checked = False
+
+                # 3. Linux /proc/meminfo fallback
+                if not darwin_checked and os.path.exists("/proc/meminfo"):
+                    try:
+                        with open('/proc/meminfo', 'r') as f:
+                            meminfo = {}
+                            for line in f:
+                                if ':' in line:
+                                    key, val = line.split(':', 1)
+                                    meminfo[key.strip()] = val.strip()
+                            
+                            total = int(meminfo.get('MemTotal', '0').split()[0]) * 1024
+                            available = int(meminfo.get('MemAvailable', '0').split()[0]) * 1024
+                            used = total - available
+                            used_percent = (used / total) * 100 if total > 0 else 0
+                            
+                            details.update({
+                                "total_mb": round(total / (1024**2), 2),
+                                "available_mb": round(available / (1024**2), 2),
+                                "used_mb": round(used / (1024**2), 2),
+                                "used_percent": round(used_percent, 2),
+                            })
+                    except Exception:
+                        pass
             
-            if used_percent > self.threshold_percent:
+            # Memory pressure threshold: 20% free RAM (<20% free = >80% used) triggers fail-closed / unhealthy
+            if details.get("is_critical") or used_percent > self.threshold_percent:
                 return HealthCheckResult(
                     name=self.name,
                     status=HealthStatus.UNHEALTHY,
-                    message=f"High memory usage: {used_percent:.1f}%",
+                    message=f"High memory pressure / usage: {used_percent:.1f}%",
                     details=details,
                     duration=time.time() - started,
                 )
-            elif used_percent > self.threshold_percent * 0.8:
+            elif used_percent > (self.threshold_percent * 0.8) or used_percent > 70.0:
                 return HealthCheckResult(
                     name=self.name,
                     status=HealthStatus.DEGRADED,
@@ -344,6 +364,83 @@ class MemoryUsageCheck(HealthCheck):
                 name=self.name,
                 status=HealthStatus.UNHEALTHY,
                 message=f"Failed to check memory: {e!s}",
+                details={"error": str(e)},
+                duration=time.time() - started,
+            )
+
+
+class ThermalHealthCheck(HealthCheck):
+    """Check system thermal state and throttling."""
+
+    def __init__(self, timeout: float = 5.0):
+        super().__init__("thermal_state", timeout)
+
+    def check(self) -> HealthCheckResult:
+        started = time.time()
+        try:
+            from turzx.power import SystemPowerManager, ThermalState
+            mgr = SystemPowerManager.get_instance()
+            thermal_info = mgr.thermal_manager.get_thermal_info()
+            details = thermal_info.to_dict()
+
+            if thermal_info.state == ThermalState.CRITICAL:
+                return HealthCheckResult(
+                    name=self.name,
+                    status=HealthStatus.UNHEALTHY,
+                    message=f"Thermal state CRITICAL: {thermal_info.temperature:.1f}°C (>85°C)",
+                    details=details,
+                    duration=time.time() - started,
+                )
+            elif thermal_info.state == ThermalState.MODERATE:
+                return HealthCheckResult(
+                    name=self.name,
+                    status=HealthStatus.DEGRADED,
+                    message=f"Thermal state MODERATE: {thermal_info.temperature:.1f}°C (>75°C)",
+                    details=details,
+                    duration=time.time() - started,
+                )
+            return HealthCheckResult(
+                name=self.name,
+                status=HealthStatus.HEALTHY,
+                message=f"Thermal state normal: {thermal_info.temperature:.1f}°C",
+                details=details,
+                duration=time.time() - started,
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                name=self.name,
+                status=HealthStatus.UNKNOWN,
+                message=f"Failed to query thermal state: {e}",
+                details={"error": str(e)},
+                duration=time.time() - started,
+            )
+
+
+class PowerModeHealthCheck(HealthCheck):
+    """Check system power mode and resource allocation state."""
+
+    def __init__(self, timeout: float = 5.0):
+        super().__init__("power_mode", timeout)
+
+    def check(self) -> HealthCheckResult:
+        started = time.time()
+        try:
+            from turzx.power import SystemPowerManager
+            mgr = SystemPowerManager.get_instance()
+            telemetry = mgr.get_system_telemetry()
+            mode = telemetry.get("power_mode", "balanced")
+            return HealthCheckResult(
+                name=self.name,
+                status=HealthStatus.HEALTHY,
+                message=f"Power mode active: {mode} ({telemetry.get('capacity_percent', 70)}%)",
+                details=telemetry,
+                duration=time.time() - started,
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                name=self.name,
+                status=HealthStatus.UNKNOWN,
+                message=f"Failed to query power mode: {e}",
                 details={"error": str(e)},
                 duration=time.time() - started,
             )
