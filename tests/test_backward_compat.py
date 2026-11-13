@@ -7,6 +7,7 @@ Verifies:
 """
 
 import importlib
+import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -122,23 +123,35 @@ class TestSendImageToDisplay(unittest.TestCase):
         mock_driver.display_image_file.return_value = True
         mock_driver_cls.return_value = mock_driver
 
-        test_args = [
-            "send_image_to_display.py",
-            "35inchENG/3.5/back18.png",
-            "-b", "75",
-            "-o", "1",
-            "--fit", "contain",
-            "--clear",
-        ]
-        with patch.object(sys, "argv", test_args):
-            send_image_to_display.main()
+        import tempfile
+        from PIL import Image
 
-        mock_driver.connect.assert_called_once()
-        mock_driver.set_orientation.assert_called_once_with(1)
-        mock_driver.set_brightness.assert_called_once_with(75)
-        mock_driver.clear.assert_called_once()
-        mock_driver.display_image_file.assert_called_once_with("35inchENG/3.5/back18.png", fit_mode="contain")
-        mock_driver.disconnect.assert_called_once()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            temp_path = tf.name
+            img = Image.new("RGB", (320, 480), color="blue")
+            img.save(temp_path)
+
+        try:
+            test_args = [
+                "send_image_to_display.py",
+                temp_path,
+                "-b", "75",
+                "-o", "1",
+                "--fit", "contain",
+                "--clear",
+            ]
+            with patch.object(sys, "argv", test_args):
+                send_image_to_display.main()
+
+            mock_driver.connect.assert_called_once()
+            mock_driver.set_orientation.assert_called_once_with(1)
+            mock_driver.set_brightness.assert_called_once_with(75)
+            mock_driver.clear.assert_called_once()
+            mock_driver.display_image_file.assert_called_once_with(temp_path, fit_mode="contain")
+            mock_driver.disconnect.assert_called_once()
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
 
 if __name__ == "__main__":
